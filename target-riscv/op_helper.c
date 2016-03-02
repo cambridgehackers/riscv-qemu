@@ -1043,8 +1043,14 @@ void tlb_fill(CPUState *cs, target_ulong addr, int is_write, int mmu_idx,
 void riscv_cpu_unassigned_access(CPUState *cs, hwaddr addr, bool is_write,
         bool is_exec, int unused, unsigned size)
 {
+    target_ulong pc;
+    target_ulong cs_base;
+    int          flags;
+    cpu_get_tb_cpu_state(cs->env_ptr, &pc, &cs_base, &flags);
     printf("unassigned address not implemented for riscv\n");
-    printf("unassigned Address: %016lX\n", addr);
+    printf("Instruction Address: %016lX\n", pc);
+    printf("unassigned Address:  %016lX\n", addr);
+
     exit(1);
 }
 
