@@ -45,6 +45,7 @@
 #include "hw/hw.h"
 #include "hw/i386/pc.h"
 #include "hw/char/serial.h"
+#include "hw/riscv/fpgadev.h"
 #include "hw/riscv/softint.h"
 #include "hw/riscv/htif/htif.h"
 #include "hw/riscv/htif/frontend.h"
@@ -60,6 +61,7 @@
 #include "hw/pci/pci.h"
 #include "sysemu/char.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/device_tree.h"
 #include "sysemu/arch_init.h"
 #include "qemu/log.h"
 #include "hw/riscv/bios.h"
@@ -77,6 +79,7 @@
 #include "hw/empty_slot.h"
 #include "qemu/error-report.h"
 #include "sysemu/block-backend.h"
+#include <dlfcn.h>
 
 #define TYPE_RISCV_BOARD "riscv-board"
 #define RISCV_BOARD(obj) OBJECT_CHECK(BoardState, (obj), TYPE_RISCV_BOARD)
@@ -148,17 +151,19 @@ uint64_t identity_translate(void *opaque, uint64_t addr)
 
 static int64_t load_kernel (void)
 {
-    int64_t kernel_entry, kernel_high;
+    int64_t kernel_low, kernel_entry, kernel_high;
     int big_endian;
     big_endian = 0;
 
     if (load_elf(loaderparams.kernel_filename, identity_translate, NULL,
-                 (uint64_t *)&kernel_entry, NULL, (uint64_t *)&kernel_high,
+                 (uint64_t *)&kernel_entry,(uint64_t *) &kernel_low, (uint64_t *)&kernel_high,
                  big_endian, ELF_MACHINE, 1) < 0) {
         fprintf(stderr, "qemu: could not load kernel '%s'\n",
                 loaderparams.kernel_filename);
         exit(1);
     }
+    fprintf(stderr, "loaded %s: kernel_entry=%lx kernel_low=%lx kernel_high=%lx\n",
+            loaderparams.kernel_filename, kernel_entry, kernel_low, kernel_high);
     return kernel_entry;
 }
 
@@ -194,6 +199,7 @@ static void riscv_board_init(MachineState *args)
     const char *kernel_filename = args->kernel_filename;
     const char *kernel_cmdline = args->kernel_cmdline;
     const char *initrd_filename = args->initrd_filename;
+    const char *dtb_arg = args->dtb;
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *main_mem = g_new(MemoryRegion, 1);
     RISCVCPU *cpu;
@@ -269,19 +275,59 @@ static void riscv_board_init(MachineState *args)
     // serial_mm_init(system_memory, 0xF0000400, 0, env->irq[5], 1843200/16,
     //         serial_hds[0], DEVICE_NATIVE_ENDIAN);
 
-    // setup HTIF Block Device if one is specified as -hda FILENAME
-    htifbd_drive = drive_get_by_index(IF_IDE, 0);
-    if (NULL == htifbd_drive) {
-        htifbd_fname = NULL;
-    } else {
-        htifbd_fname = blk_bs(blk_by_legacy_dinfo(htifbd_drive))->filename;
-        // get rid of orphaned drive warning, until htif uses the real blockdev
-        htifbd_drive->is_default = true;
+    if (0) {
+        // setup HTIF Block Device if one is specified as -hda FILENAME
+        htifbd_drive = drive_get_by_index(IF_IDE, 0);
+        if (NULL == htifbd_drive) {
+            htifbd_fname = NULL;
+        } else {
+            htifbd_fname = blk_bs(blk_by_legacy_dinfo(htifbd_drive))->filename;
+            // get rid of orphaned drive warning, until htif uses the real blockdev
+            htifbd_drive->is_default = true;
+        }
+
+        // add htif device at 0xFFFFFFFFF0000000
+        htif_mm_init(system_memory, 0xFFFFFFFFF0000000L, env->irq[4], main_mem,
+                     htifbd_fname, kernel_cmdline, env, serial_hds[0]);
     }
 
-    // add htif device at 0xFFFFFFFFF0000000
-    htif_mm_init(system_memory, 0xFFFFFFFFF0000000L, env->irq[4], main_mem,
-            htifbd_fname, kernel_cmdline, env, serial_hds[0]);
+    if (kernel_cmdline) {
+        int kernel_size = get_image_size(kernel_cmdline);
+        MemoryRegion *kernel_mem = g_new(MemoryRegion, 1);
+        memory_region_init_ram(kernel_mem, NULL, "kernel.ram", kernel_size, &error_fatal);
+        vmstate_register_ram_global(kernel_mem);
+        memory_region_add_subregion(system_memory, 0xc8000000, kernel_mem);
+        load_image_size(kernel_cmdline, memory_region_get_ram_ptr(kernel_mem), kernel_size);
+        stl_le_p(memory_region_get_ram_ptr(main_mem)+12, 0xc8000000);
+    }        
+
+    if (dtb_arg) {
+        int fdt_size = get_image_size(dtb_arg);
+        MemoryRegion *fdt_mem = g_new(MemoryRegion, 1);
+        int i;
+        memory_region_init_ram(fdt_mem, NULL, "dtb.ram", fdt_size, &error_fatal);
+        vmstate_register_ram_global(fdt_mem);
+        memory_region_add_subregion(system_memory, 0xc84c0000, fdt_mem);
+
+        load_image_size(dtb_arg, memory_region_get_ram_ptr(fdt_mem), fdt_size);
+        fprintf(stderr, "Loaded device tree %s size=%d\n", dtb_arg, fdt_size);
+        for (i = 0; i < 16; i++)
+            fprintf(stderr, "fdt[%04d] = %08x\n", 4*i, *(uint32_t *)(memory_region_get_ram_ptr(fdt_mem) + 4*i));
+    }
+
+    if (1) { 
+#if 0
+        DeviceState *dev = qdev_create(NULL, "xlnx.xps-intc");
+        qdev_prop_set_uint32(dev, "kind-of-intr", 0);
+        qdev_init_nofail(dev);
+        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xC0001000);
+
+        sysbus_create_simple("xlnx.xps-uartlite", 0xC0000000, qdev_get_gpio_in(dev, 0));
+#else
+
+        fpgadev_mm_init(system_memory, 0xC0000000, env->irq[4], main_mem, env, "spikehw");
+#endif
+    }
 
     // Softint "devices" for cleaner handling of CPU-triggered interrupts
     softint_mm_init(system_memory, 0xFFFFFFFFF0000020L, env->irq[1], main_mem,
