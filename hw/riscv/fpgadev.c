@@ -57,7 +57,7 @@ static uint64_t fpgadev_mm_read(void *opaque, hwaddr addr, unsigned size)
     int flags;
     cpu_get_tb_cpu_state(fpgadevstate->env, &pc, &cs_base, &flags);
 
-    fprintf(stderr, "fpgadev_mm_read pc=%lx addr=%lx -> value=%lx\n", pc, addr, value);
+    //fprintf(stderr, "fpgadev_mm_read pc=%lx addr=%lx -> value=%lx\n", pc, addr, value);
     return value;
 }
 
@@ -66,7 +66,7 @@ static void fpgadev_mm_write(void *opaque, hwaddr addr,
                             uint64_t value, unsigned size)
 {
     FpgadevState *fpgadevstate = opaque;
-    fprintf(stderr, "fpgadev_mm_write addr=%lx value=%lx\n", addr, value);
+    //fprintf(stderr, "fpgadev_mm_write addr=%lx value=%lx\n", addr, value);
     fpgadevstate->ops->write(addr, value);
 }
 
@@ -78,10 +78,29 @@ static const MemoryRegionOps fpgadev_mm_ops[3] = {
     },
 };
 
+static FpgadevState *fpgadevstate;
+static void fpgadev_irq_callback(int irq)
+{
+    CPURISCVState *env = fpgadevstate->env;
+    //RISCVCPU *cpu = riscv_env_get_cpu(env);
+    if (irq != 0) {
+        env->csr[NEW_CSR_MIP] |= MIP_MXIP;
+        env->csr[NEW_CSR_MIP] |= MIP_SXIP;
+        qemu_irq_raise(fpgadevstate->irq);
+    } else {
+        env->csr[NEW_CSR_MIP] &= ~MIP_MXIP;
+        env->csr[NEW_CSR_MIP] &= ~MIP_SXIP;
+        qemu_irq_lower(fpgadevstate->irq);
+    }
+    if (0)
+    fprintf(stderr, "fpgadev irq level change irq=%d mip=%08lx sip=%08lx mie=%08lx sie=%08lx\n",
+            irq, env->csr[NEW_CSR_MIP], env->csr[NEW_CSR_SIP], env->csr[NEW_CSR_MIE], env->csr[NEW_CSR_SIE]);
+}
+
 FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, qemu_irq irq,
                               MemoryRegion *main_mem, CPURISCVState *env, const char * name)
 {
-    FpgadevState *fpgadevstate;
+    //FpgadevState *fpgadevstate;
 
     fpgadevstate = g_malloc0(sizeof(FpgadevState));
     fpgadevstate->irq = irq;
@@ -96,11 +115,11 @@ FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, qemu_irq
     if (fpgadevstate->lib == NULL) {
         fprintf(stderr, "failed to open library: %s\n", dlerror());
     } else {
-        struct FpgaOps *(*fpgadev_init)(void);
+        struct FpgaOps *(*fpgadev_init)(void (*irqCallback)(int irq));
         fpgadev_init = dlsym(fpgadevstate->lib, "fpgadev_init");
         fprintf(stderr, "connectal.so fpgadev_init=%p\n", fpgadev_init);
         if (fpgadev_init)
-            fpgadevstate->ops = fpgadev_init();
+            fpgadevstate->ops = fpgadev_init(fpgadev_irq_callback);
     }
 
     vmstate_register(NULL, base, &vmstate_fpgadev, fpgadevstate);
