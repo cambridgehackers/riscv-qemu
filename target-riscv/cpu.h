@@ -177,9 +177,13 @@ struct CPURISCVState;
 #define MIP_STIP            0x00000020
 #define MIP_HTIP            0x00000040
 #define MIP_MTIP            0x00000080
+#define MIP_SXIP            0x00020000
+#define MIP_HXIP            0x00040000
+#define MIP_MXIP            0x00080000
 
 #define SIP_SSIP MIP_SSIP
 #define SIP_STIP MIP_STIP
+#define SIP_SXIP MIP_SXIP
 
 #define PRV_U 0
 #define PRV_S 1
@@ -201,6 +205,7 @@ struct CPURISCVState;
 #define IRQ_TIMER  1
 #define IRQ_HOST   2
 #define IRQ_COP    3
+#define IRQ_EXTERNAL 4
 
 #define IMPL_ROCKET 1
 
@@ -372,7 +377,16 @@ static inline int cpu_riscv_hw_interrupts_pending(CPURISCVState *env)
             // no irq to lower, that is done by the CPU
             return IRQ_TIMER;
         }
-    }
+
+        if (interrupts & MIP_SXIP) {
+//#ifdef RISCV_DEBUG_PRINT
+            fprintf(stderr, "taking external interrupt S\n");
+//#endif
+
+            // no irq to lower, that is done by the CPU
+            return IRQ_EXTERNAL;
+        }
+}
 
     // indicates no pending interrupt to handler in cpu-exec.c
     return -1;

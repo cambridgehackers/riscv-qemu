@@ -638,7 +638,7 @@ inline void csr_write_helper(CPURISCVState *env, target_ulong val_to_write,
         break;
     }
     case NEW_CSR_SIE: {
-        target_ulong mask = MIP_SSIP | MIP_STIP;
+        target_ulong mask = MIP_SSIP | MIP_STIP | MIP_SXIP;
         env->csr[NEW_CSR_MIE] = (env->csr[NEW_CSR_MIE] & ~mask) |
             (val_to_write & mask);
         break;
@@ -751,9 +751,9 @@ inline target_ulong csr_read_helper(CPURISCVState *env, target_ulong csrno)
         return ss;
     }
     case NEW_CSR_SIP:
-        return env->csr[NEW_CSR_MIP] & (MIP_SSIP | MIP_STIP);
+        return env->csr[NEW_CSR_MIP] & (MIP_SSIP | MIP_STIP | MIP_SXIP);
     case NEW_CSR_SIE:
-        return env->csr[NEW_CSR_MIE] & (MIP_SSIP | MIP_STIP);
+        return env->csr[NEW_CSR_MIE] & (MIP_SSIP | MIP_STIP | MIP_SXIP);
     case NEW_CSR_SEPC:
         return env->csr[NEW_CSR_SEPC];
     case NEW_CSR_SBADADDR:
