@@ -379,9 +379,9 @@ static inline int cpu_riscv_hw_interrupts_pending(CPURISCVState *env)
         }
 
         if (interrupts & MIP_SXIP) {
-//#ifdef RISCV_DEBUG_PRINT
+            #ifdef RISCV_DEBUG_PRINT
             fprintf(stderr, "taking external interrupt S\n");
-//#endif
+            #endif
 
             // no irq to lower, that is done by the CPU
             return IRQ_EXTERNAL;
