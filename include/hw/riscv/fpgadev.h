@@ -45,7 +45,7 @@ struct FpgadevState {
 extern const VMStateDescription vmstate_fpgadev;
 extern const MemoryRegionOps fpgadev_io_ops;
 
-/* legacy pre qom */
+void fpgadev_init_fpga(void);
 FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, 
                               qemu_irq irq, MemoryRegion *main_mem, CPURISCVState *env,
                               const char * name);

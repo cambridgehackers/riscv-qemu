@@ -27,6 +27,7 @@
 #include "hw/riscv/fpgadev.h"
 #include "exec/address-spaces.h"
 #include "qemu/error-report.h"
+#include "sysemu/kvm.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -37,6 +38,7 @@ struct FpgaOps {
     uint64_t (*read)(hwaddr addr);
     void (*write)(hwaddr addr, uint64_t value);
     void (*close)(void);
+    void *(*alloc_mem)(size_t size);
 };
 
 const VMStateDescription vmstate_fpgadev = {
@@ -53,11 +55,25 @@ static uint64_t fpgadev_mm_read(void *opaque, hwaddr addr, unsigned size)
     FpgadevState *fpgadevstate = opaque;
     uint64_t value = fpgadevstate->ops->read(addr);
 
-    target_ulong pc, cs_base;
-    int flags;
-    cpu_get_tb_cpu_state(fpgadevstate->env, &pc, &cs_base, &flags);
+    if (0) {
+        target_ulong pc, cs_base;
+        int flags;
+        cpu_get_tb_cpu_state(fpgadevstate->env, &pc, &cs_base, &flags);
 
-    //fprintf(stderr, "fpgadev_mm_read pc=%lx addr=%lx -> value=%lx\n", pc, addr, value);
+        if (addr >= 0x2000 && addr < 0x5500)
+            fprintf(stderr, "fpgadev_mm_read  pc=%lx addr=%lx size=%d  reading ...\n", pc, addr, size);
+
+        if (addr == 0x1018) {
+            uint64_t ipr = fpgadevstate->ops->read(0x1004);
+            if (ipr & (1 << 5)) {
+                uint64_t iic_isr = fpgadevstate->ops->read(0x3020);
+                uint64_t iic_ier = fpgadevstate->ops->read(0x3028);
+                fprintf(stderr, "fpgadev_mm_read pc=%lx addr=%lx -> value=%lx ipr=%lx iic isr=%lx ier=%lx\n", pc, addr, value, ipr, iic_isr, iic_ier);
+            }
+        }
+        if (addr >= 0x2000 && addr < 0x5500)
+            fprintf(stderr, "fpgadev_mm_read  pc=%lx addr=%lx size=%d  read value=%08lx\n", pc, addr, size, value);
+    }
     return value;
 }
 
@@ -66,7 +82,13 @@ static void fpgadev_mm_write(void *opaque, hwaddr addr,
                             uint64_t value, unsigned size)
 {
     FpgadevState *fpgadevstate = opaque;
-    //fprintf(stderr, "fpgadev_mm_write addr=%lx value=%lx\n", addr, value);
+    if (0) {
+        target_ulong pc, cs_base;
+        int flags;
+        cpu_get_tb_cpu_state(fpgadevstate->env, &pc, &cs_base, &flags);
+        if (addr >= 0x2000 && addr < 0x5500)
+            fprintf(stderr, "fpgadev_mm_write pc=%lx addr=%lx size=%d wrote value=%08lx\n", pc, addr, size, value);
+    }
     fpgadevstate->ops->write(addr, value);
 }
 
@@ -97,19 +119,18 @@ static void fpgadev_irq_callback(int irq)
             irq, env->csr[NEW_CSR_MIP], env->csr[NEW_CSR_SIP], env->csr[NEW_CSR_MIE], env->csr[NEW_CSR_SIE]);
 }
 
-FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, qemu_irq irq,
-                              MemoryRegion *main_mem, CPURISCVState *env, const char * name)
+static void *(fpgadev_alloc_mem)(size_t size, uint64_t *align)
 {
-    //FpgadevState *fpgadevstate;
+    if (align)
+        size += *align;
+    fprintf(stderr, "fpgadev_alloc_mem size=%08lx align=%08lx\n", size, (align ? *align : 0));
+    void *ptr = fpgadevstate->ops->alloc_mem(size);
+    return ptr;
+}
 
+void fpgadev_init_fpga(void)
+{
     fpgadevstate = g_malloc0(sizeof(FpgadevState));
-    fpgadevstate->irq = irq;
-    fpgadevstate->address_space = address_space;
-    fpgadevstate->env = env;
-
-    char * namebuf = g_malloc0(sizeof(char)*100);
-    sprintf(namebuf, "%s%s", "fpgadev", name);
-    fpgadevstate->name = namebuf;
 
     fpgadevstate->lib = dlopen("./connectal.so", RTLD_NOW);
     if (fpgadevstate->lib == NULL) {
@@ -121,6 +142,20 @@ FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, qemu_irq
         if (fpgadev_init)
             fpgadevstate->ops = fpgadev_init(fpgadev_irq_callback);
     }
+
+    phys_mem_set_alloc(fpgadev_alloc_mem);
+}
+
+FpgadevState *fpgadev_mm_init(MemoryRegion *address_space, hwaddr base, qemu_irq irq,
+                              MemoryRegion *main_mem, CPURISCVState *env, const char * name)
+{
+    fpgadevstate->irq = irq;
+    fpgadevstate->address_space = address_space;
+    fpgadevstate->env = env;
+
+    char * namebuf = g_malloc0(sizeof(char)*100);
+    sprintf(namebuf, "%s%s", "fpgadev", name);
+    fpgadevstate->name = namebuf;
 
     vmstate_register(NULL, base, &vmstate_fpgadev, fpgadevstate);
 

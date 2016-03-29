@@ -243,6 +243,9 @@ static void riscv_board_init(MachineState *args)
     cpu = RISCV_CPU(first_cpu);
     env = &cpu->env;
 
+    // sets up a memory allocator, so needs to come before main_mem
+    fpgadev_init_fpga();
+
     /* register system main memory (actual RAM) */
     memory_region_init_ram(main_mem, NULL, "riscv_board.ram", ram_size + DEVTREE_LEN, &error_fatal);
     // for CSR_MIOBASE
@@ -315,19 +318,7 @@ static void riscv_board_init(MachineState *args)
             fprintf(stderr, "fdt[%04d] = %08x\n", 4*i, *(uint32_t *)(memory_region_get_ram_ptr(fdt_mem) + 4*i));
     }
 
-    if (1) { 
-#if 0
-        DeviceState *dev = qdev_create(NULL, "xlnx.xps-intc");
-        qdev_prop_set_uint32(dev, "kind-of-intr", 0);
-        qdev_init_nofail(dev);
-        sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xC0001000);
-
-        sysbus_create_simple("xlnx.xps-uartlite", 0xC0000000, qdev_get_gpio_in(dev, 0));
-#else
-
-        fpgadev_mm_init(system_memory, 0xC0000000, env->irq[4], main_mem, env, "spikehw");
-#endif
-    }
+    fpgadev_mm_init(system_memory, 0xC0000000, env->irq[4], main_mem, env, "spikehw");
 
     // Softint "devices" for cleaner handling of CPU-triggered interrupts
     softint_mm_init(system_memory, 0xFFFFFFFFF0000020L, env->irq[1], main_mem,
