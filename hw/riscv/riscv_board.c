@@ -246,6 +246,8 @@ static void riscv_board_init(MachineState *args)
     // sets up a memory allocator, so needs to come before main_mem
     fpgadev_init_fpga();
 
+    fprintf(stderr, "%s:%d ram_size=%ld\n", __FUNCTION__, __LINE__, ram_size);
+
     /* register system main memory (actual RAM) */
     memory_region_init_ram(main_mem, NULL, "riscv_board.ram", ram_size + DEVTREE_LEN, &error_fatal);
     // for CSR_MIOBASE
@@ -294,6 +296,8 @@ static void riscv_board_init(MachineState *args)
                      htifbd_fname, kernel_cmdline, env, serial_hds[0]);
     }
 
+    fprintf(stderr, "%s:%d kernel_cmdline=%s\n", __FUNCTION__, __LINE__, kernel_cmdline);
+
     if (kernel_cmdline) {
         int kernel_size = get_image_size(kernel_cmdline);
         MemoryRegion *kernel_mem = g_new(MemoryRegion, 1);
@@ -304,21 +308,26 @@ static void riscv_board_init(MachineState *args)
         stl_le_p(memory_region_get_ram_ptr(main_mem)+12, 0xc8000000);
     }        
 
+    fprintf(stderr, "%s:%d dtb_arg=%s\n", __FUNCTION__, __LINE__, dtb_arg);
     if (dtb_arg) {
         int fdt_size = get_image_size(dtb_arg);
         MemoryRegion *fdt_mem = g_new(MemoryRegion, 1);
         int i;
         memory_region_init_ram(fdt_mem, NULL, "dtb.ram", fdt_size, &error_fatal);
         vmstate_register_ram_global(fdt_mem);
-        memory_region_add_subregion(system_memory, 0xc84c0000, fdt_mem);
-
+        //memory_region_add_subregion(system_memory, 0xc84c0000, fdt_mem);
+        memory_region_add_subregion(system_memory, 0x04080000, fdt_mem);
         load_image_size(dtb_arg, memory_region_get_ram_ptr(fdt_mem), fdt_size);
         fprintf(stderr, "Loaded device tree %s size=%d\n", dtb_arg, fdt_size);
         for (i = 0; i < 16; i++)
             fprintf(stderr, "fdt[%04d] = %08x\n", 4*i, *(uint32_t *)(memory_region_get_ram_ptr(fdt_mem) + 4*i));
     }
 
+    fprintf(stderr, "%s:%d initializing fpgadev\n", __FUNCTION__, __LINE__);
+
     fpgadev_mm_init(system_memory, 0xC0000000, env->irq[4], main_mem, env, "spikehw");
+
+    fprintf(stderr, "%s:%d initializing external interrupts\n", __FUNCTION__, __LINE__);
 
     // Softint "devices" for cleaner handling of CPU-triggered interrupts
     softint_mm_init(system_memory, 0xFFFFFFFFF0000020L, env->irq[1], main_mem,
@@ -327,6 +336,8 @@ static void riscv_board_init(MachineState *args)
             env, "STIP");
     softint_mm_init(system_memory, 0xFFFFFFFFF0000060L, env->irq[3], main_mem,
             env, "MSIP");
+
+    fprintf(stderr, "%s:%d done\n", __FUNCTION__, __LINE__);
 
     // TODO: VIRTIO
 }
